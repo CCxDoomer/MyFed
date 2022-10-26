@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+Nbp = 128
 N_HDR_dims = 4
 N_enc_dims = 94
 N_depth_H = 4
@@ -8,18 +9,19 @@ N_depth_P = 3
 N_hidden = N_emb_dims = N_enc_dims + 2
 N_Atten = 6
 Nff = 1
+device = "cuda" #if torch.cuda.is_available() else "cpu"
 
 
 class HAE(nn.Module):
     def __init__(self):
         super(HAE, self).__init__()
         self.enc_fc = nn.Linear(N_HDR_dims, N_enc_dims)
-        self.enc_pwise_conv = []
+        self.enc_pwise_conv = [None for i in range(N_depth_H)]
         for i in range(N_depth_H):
-            self.enc_pwise_conv.append(nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=1, padding=0))
+            self.enc_pwise_conv[i] = nn.Linear(N_enc_dims, N_enc_dims).to(device)
         self.dec_fc = nn.Linear(N_enc_dims, N_HDR_dims)
 
-    def foward(self, input):
+    def Encode(self, input):
         x = input
         x = self.enc_fc(x)
         for i in range(N_depth_H):
@@ -27,9 +29,20 @@ class HAE(nn.Module):
         output = x
         return output
 
+    def Decode(self, input):
+        x = input
+        output = self.dec_fc(x)
+        return output
+
+    def forward(self, input):
+        x = self.Encode(input)
+        x = self.Decode(x)
+        output = x
+        return output
+
 
 class PAE(nn.Module):
-    def __init__(self, input_dim):
+    def __init__(self, input_dim=Nbp):
         super(PAE, self).__init__()
         self.enc_conv = nn.Conv1d(input_dim, N_enc_dims, kernel_size=4, stride=2)
         self.act = nn.GELU()
@@ -49,7 +62,7 @@ class PAE(nn.Module):
         self.squeeze = nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=8, stride=4)
         self.dec_fc = nn.Conv1d(N_enc_dims, input_dim, kernel_size=8, stride=8)
 
-    def foward(self, input):
+    def forward(self, input):
         x = input
         x = self.enc_conv(x)
         for i in range(N_depth_P):
@@ -121,4 +134,6 @@ class PreIntegrality(nn.Module):
         min_x = -self.maxPool(-x)
         x = torch.cat((max_x, min_x), 0)
         x = self.dense(x)
+        output = x
+        return output
 

@@ -7,6 +7,7 @@ Nb = 784
 Nbp = 128
 Np = 32
 
+
 # 根据规则区分服务器和客户端
 def NormalizationSrcDst(src, sport, dst, dport):
     if sport < dport:
@@ -58,19 +59,6 @@ class Stream:
             self.next_time = timestamp
         self.start_time = min(timestamp, self.start_time)
         self.end_time = max(timestamp, self.end_time)
-        # packet_head = ""
-        # if packet["IP"].src == self.src:
-        #     # 代表这是一个客户端发往服务器的包
-        #     packet_head += "---> "
-        #     if self.protol == "TCP":
-        #         # 对TCP包额外处理
-        #         packet_head += "[{:^4}] ".format(str(packet['TCP'].flags))
-        #         if self.packet_num == 1 or packet['TCP'].flags == "S":
-        #             # 对一个此流的包或者带有Syn标识的包的时间戳进行记录，作为starttime
-        #             self.start_time = timestamp
-        # else:
-        #     packet_head += "<--- "
-        # packet_information = packet_head + "timestamp={}".format(timestamp)
         packet_information = list()
         ip_packet = packet.payload
         tpl_packet = ip_packet.payload
@@ -96,14 +84,14 @@ class Stream:
                 self.LPi.append(len(original_payload))
             else:
                 self.isPayFull = True
-                original_payload = original_payload[:Nb-self.pay_len]
-                self.LPi.append(Nb-self.pay_len)
+                original_payload = original_payload[:Nb - self.pay_len]
+                self.LPi.append(Nb - self.pay_len)
         else:
             original_payload = b''
-            self.LPi.append(0.)
+            self.LPi.append(0.0)
         # 负载0-1标准化
         for item in original_payload:
-            PAY.append(item/255.)
+            PAY.append(item / 255.)
         self.HDR.append(packet_information)
         self.PAY.append(PAY)
 
@@ -137,8 +125,8 @@ def read_pcap(pcapname):
     # PAY填充至最长PAYi的长度，同时满足长度整除8
     for stream_hash in streams:
         stream = streams[stream_hash]
-        max_pay_len = max(stream.LPi)
-        max_pay_len = max_pay_len + 8 - (max_pay_len % 8)
+        max_pay_len = Nbp  # max(stream.LPi)
+        # max_pay_len = max_pay_len + 8 - (max_pay_len % 8)
         for i in range(len(stream.LPi)):
             pay_len = len(stream.PAY[i])
             pad_len = max_pay_len - pay_len
@@ -150,4 +138,3 @@ def pcap_proc(filename='test.pcap', ):
     read_pcap(pcapname)
     global streams
     return streams
-
