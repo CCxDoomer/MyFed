@@ -4,6 +4,7 @@ from scapy.all import *
 
 noLog = False
 Nb = 784
+Nbp = 128
 Np = 32
 
 # 根据规则区分服务器和客户端
@@ -85,9 +86,10 @@ class Stream:
         # 数据包方向 0与流方向相同，1与流方向相反
         packet_information.append(0 if packet["IP"].src == self.src else 0)
         # 负载部分
+        # 总共取前Nb个字节的负载，每个包取前Nbp个字节的负载
         PAY = []
-        if len(original_payload) > 128:
-            original_payload = original_payload[:128]
+        if len(original_payload) > Nbp:
+            original_payload = original_payload[:Nbp]
         if not self.isPayFull:
             if len(original_payload) + self.pay_len <= Nb:
                 self.pay_len += len(original_payload)
@@ -99,42 +101,23 @@ class Stream:
         else:
             original_payload = b''
             self.LPi.append(0.)
+        # 负载0-1标准化
         for item in original_payload:
             PAY.append(item/255.)
         self.HDR.append(packet_information)
         self.PAY.append(PAY)
 
-    def get_timestamp(self, packet):
-        if packet['IP'].proto == 'udp':
-            # udp协议查不到时间戳
-            return 0
-        for t in packet['TCP'].options:
-            if t[0] == 'Timestamp':
-                return t[1][0]
-        # 存在查不到时间戳的情况
-        return -1
 
-    def __repr__(self):
-        return "{} {}:{} -> {}:{} {} {} {}".format(self.protol, self.src,
-                                                   self.sport, self.dst,
-                                                   self.dport, self.byte_num,
-                                                   self.start_time, self.end_time)
-
-
-# pcapname：输入pcap的文件名
-# csvname : 输出csv的文件名
 def read_pcap(pcapname):
     try:
-        # 可能存在格式错误读取失败的情况
         packets = rdpcap(pcapname)
     except:
-        print("read pcap error")
+        print("error")
         return
     global streams
     streams = {}
     for data in packets:
         try:
-            # 抛掉不是IP协议的数据包
             data['IP']
         except:
             continue
@@ -143,15 +126,15 @@ def read_pcap(pcapname):
         elif data['IP'].proto == 17:
             protol = "UDP"
         else:
-            # 非这两种协议的包，忽视掉
             continue
         src, sport, dst, dport = NormalizationSrcDst(data['IP'].src, data[protol].sport,
                                                      data['IP'].dst, data[protol].dport)
-        hash_str = tuple2hash(src, sport, dst, dport, protol)
-        if hash_str not in streams:
-            streams[hash_str] = Stream(src, sport, dst, dport, protol)
-        if streams[hash_str].packet_num < Np:
-            streams[hash_str].add_packet(data)
+        stream_hash = tuple2hash(src, sport, dst, dport, protol)
+        if stream_hash not in streams:
+            streams[stream_hash] = Stream(src, sport, dst, dport, protol)
+        if streams[stream_hash].packet_num < Np:
+            streams[stream_hash].add_packet(data)
+    # PAY填充至最长PAYi的长度，同时满足长度整除8
     for stream_hash in streams:
         stream = streams[stream_hash]
         max_pay_len = max(stream.LPi)
@@ -160,27 +143,10 @@ def read_pcap(pcapname):
             pay_len = len(stream.PAY[i])
             pad_len = max_pay_len - pay_len
             stream.PAY[i].extend([0 for j in range(pad_len)])
-    # with open(csvname, "a+", newline="") as file:
-    #     writer = csv.writer(file)
-    #     for v in streams.values():
-    #         writer.writerow((
-    #             time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(v.start_time)), v.end_time - v.start_time,
-    #             v.src, v.sport, v.dst, v.dport,
-    #             v.packet_num, v.byte_num, v.byte_num / v.packet_num, v.protol))
-    #         if noLog == False:
-    #             print(v)
 
 
-def pcap_proc():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--pcap", help="pcap文件名", action='store', default='test.pcap')
-    parser.add_argument("-o", "--output", help="输出的csv文件名", action='store', default="stream.csv")
-    parser.add_argument("-n", "--nolog", action='store_true', help='读取当前文件夹下的所有pcap文件', default=False)
-    parser.add_argument("-t", "--test", action='store_true', default=False)
-    args = parser.parse_args()
-    csvname = args.output
-    noLog = args.nolog
-    pcapname = args.pcap
+def pcap_proc(filename='test.pcap', ):
+    pcapname = filename
     read_pcap(pcapname)
     global streams
     return streams

@@ -5,7 +5,9 @@ N_HDR_dims = 4
 N_enc_dims = 94
 N_depth_H = 4
 N_depth_P = 3
-N_emb_dims = N_enc_dims + 2
+N_hidden = N_emb_dims = N_enc_dims + 2
+N_Atten = 6
+Nff = 1
 
 
 class HAE(nn.Module):
@@ -63,7 +65,7 @@ class PAE(nn.Module):
 
 
 class MultAttention(nn.Module):
-    def __init__(self, dim, num_heads=1, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
+    def __init__(self, dim, num_heads=N_Atten, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
         super(MultAttention, self).__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
@@ -73,8 +75,16 @@ class MultAttention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
+        self.norm = nn.BatchNorm1d(dim, )
+        self.FFN = nn.Sequential(
+            nn.Linear(N_hidden, Nff, bias=True),
+            nn.ReLU(),
+            nn.Linear(Nff, N_hidden, bias=True)
+        )
 
-    def forward(self, x: torch.Tensor):
+
+    def forward(self, input: torch.Tensor):
+        x = input
         B, N, C = x.shape
         # B = batch_size
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
@@ -88,4 +98,27 @@ class MultAttention(nn.Module):
         x = self.proj(x)
         # fc
         x = self.proj_drop(x)
-        return x
+        # add and norm
+        x = self.norm(x + input)
+        # FFN
+        tmp = x
+        x = self.FFN(x)
+        # add and norm
+        x = self.norm(x + tmp)
+        output = x
+        return output
+
+
+class PreIntegrality(nn.Module):
+    def __init__(self):
+        super(PreIntegrality, self).__init__()
+        self.maxPool = nn.AdaptiveMaxPool1d(1)
+        self.dense = nn.Linear(2 * N_enc_dims, 1)
+
+    def forward(self, input: torch.Tensor):
+        x = input
+        max_x = self.maxPool(x)
+        min_x = -self.maxPool(-x)
+        x = torch.cat((max_x, min_x), 0)
+        x = self.dense(x)
+
