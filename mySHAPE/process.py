@@ -6,7 +6,10 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from pcap_proc import Stream, pcap_proc
 
-device = "cuda" #if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
+E_HAE = 10
+E_PAE = 10
+
 
 class myPreDataSet(object):
     def __init__(self, X):
@@ -46,16 +49,17 @@ def stream_to_data(streams: list):
     PAY_val_set = myPreDataSet(PAY[PAY_div1:PAY_div2])
     PAY_test_set = myPreDataSet(PAY[PAY_div2:])
     return tHDR, tPAY, [HDR_train_set, HDR_val_set, HDR_test_set], \
-                       [PAY_train_set, PAY_val_set, PAY_test_set]
+           [PAY_train_set, PAY_val_set, PAY_test_set]
 
 
 def pretrain_HAE(HDR_set: list, myHAE: Model.HAE):
+    print(f"Pretraining HAE")
     myHAE.train()
     train_loader = DataLoader(HDR_set[0], batch_size=32, shuffle=False)
     val_loader = DataLoader(HDR_set[1], batch_size=32, shuffle=False)
     optimizer = torch.optim.Adam(myHAE.parameters(), lr=1e-3, )
     loss_fn = nn.MSELoss()
-    for epoch in tqdm(range(200)):
+    for epoch in tqdm(range(E_HAE)):
         train_loss = []
         for x in train_loader:
             x = x.to(device)
@@ -71,14 +75,56 @@ def pretrain_HAE(HDR_set: list, myHAE: Model.HAE):
         for x in val_loader:
             x = x.to(device)
             x_ = myHAE(x)
-            x = x.cpu(); x_ = x_.cpu()
+            x = x.cpu()
+            x_ = x_.cpu()
             loss = loss_fn(x_, x)
             val_loss.append(loss.cpu().item())
         val_loss = np.mean(val_loss)
         myHAE.train()
         tqdm.write('epoch {:03d} train_loss {:.8f} val_loss {:.8f}'.format(epoch, train_loss, val_loss))
 
+
+def pretrain_PAE(PAE_set: list, myPAE: Model.PAE):
+    print(f"Pretraining PAE")
+    myPAE.train()
+    train_loader = DataLoader(PAE_set[0], batch_size=32, shuffle=False)
+    val_loader = DataLoader(PAE_set[1], batch_size=32, shuffle=False)
+    optimizer = torch.optim.Adam(myPAE.parameters(), lr=1e-4, )
+    loss_fn = nn.MSELoss()
+    for epoch in tqdm(range(E_PAE)):
+        train_loss = []
+        for x in train_loader:
+            x = x.to(device)
+            x = x.unsqueeze(1)
+            x_ = myPAE(x)
+            x = x.squeeze()
+            loss = loss_fn(x_, x)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            train_loss.append(loss.cpu().item())
+        train_loss = np.mean(train_loss)
+        myPAE.eval()
+        val_loss = []
+        for x in val_loader:
+            x = x.to(device)
+            x = x.unsqueeze(1)
+            x_ = myPAE(x)
+            x = x.squeeze()
+            x = x.cpu()
+            x_ = x_.cpu()
+            loss = loss_fn(x_, x)
+            val_loss.append(loss.cpu().item())
+        val_loss = np.mean(val_loss)
+        myPAE.train()
+        tqdm.write('epoch {:03d} train_loss {:.8f} val_loss {:.8f}'.format(epoch, train_loss, val_loss))
+
+
 streams = pcap_proc()
-HDR, PAY, HDR_set, PAY_et = stream_to_data(streams)
-myHAE = Model.HAE().to(device)
-pretrain_HAE(HDR_set, myHAE)
+HDR, PAY, HDR_set, PAY_set = stream_to_data(streams)
+# myHAE = Model.HAE().to(device)
+# pretrain_HAE(HDR_set, myHAE)
+# torch.save(myHAE, 'myHAE.pth')
+myPAE = Model.PAE().to(device)
+pretrain_PAE(PAY_set, myPAE)
+torch.save(myPAE, 'myPAE.pth')

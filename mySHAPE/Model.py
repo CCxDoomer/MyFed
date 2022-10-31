@@ -9,7 +9,7 @@ N_depth_P = 3
 N_hidden = N_emb_dims = N_enc_dims + 2
 N_Atten = 6
 Nff = 1
-device = "cuda" #if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class HAE(nn.Module):
@@ -42,27 +42,27 @@ class HAE(nn.Module):
 
 
 class PAE(nn.Module):
-    def __init__(self, input_dim=Nbp):
+    def __init__(self, input_dim=1):
         super(PAE, self).__init__()
-        self.enc_conv = nn.Conv1d(input_dim, N_enc_dims, kernel_size=4, stride=2)
+        self.enc_conv = nn.Conv1d(input_dim, N_enc_dims, kernel_size=4, stride=2, padding=1)
         self.act = nn.GELU()
         self.enc_convs = []
         for i in range(N_depth_P):
             self.enc_convs.append(nn.Sequential(
-                nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=3, stride=1, groups=N_enc_dims),
+                nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=3, stride=1, groups=N_enc_dims, padding=1),
                 nn.GELU(),
                 nn.BatchNorm1d(N_enc_dims, )
-            ))
+            ).to(device))
         for i in range(N_depth_P):
             self.enc_convs.append(nn.Sequential(
                 nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=1),
                 nn.GELU(),
                 nn.BatchNorm1d(N_enc_dims, )
-            ))
-        self.squeeze = nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=8, stride=4)
-        self.dec_fc = nn.Conv1d(N_enc_dims, input_dim, kernel_size=8, stride=8)
+            ).to(device))
+        self.squeeze = nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=8, stride=4, padding=2)
+        self.dec_fc = nn.ConvTranspose1d(N_enc_dims, input_dim, kernel_size=8, stride=8)
 
-    def forward(self, input):
+    def Encode(self, input):
         x = input
         x = self.enc_conv(x)
         for i in range(N_depth_P):
@@ -72,8 +72,18 @@ class PAE(nn.Module):
             tmp = x
             x = self.enc_convs[2 * i + 1](x)
             x = x + tmp
-        x = self.squeeze(x)
+        output = self.squeeze(x)
+        return output
+
+    def Decode(self, input):
+        x = self.dec_fc(input)
+        x = x.squeeze()
         output = x
+        return output
+
+    def forward(self, input):
+        x = self.Encode(input)
+        output = self.Decode(x)
         return output
 
 

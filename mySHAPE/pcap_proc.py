@@ -65,9 +65,10 @@ class Stream:
         app_packet = tpl_packet.payload
         original_payload = app_packet.original
         # 负载长度
-        packet_information.append(len(original_payload))
+        packet_information.append(len(original_payload) / 65535.)
         # TCP窗口大小
-        packet_information.append(tpl_packet.window if self.protol == "TCP" else 0)
+        packet_information.append((tpl_packet.window if self.protol == "TCP" else 0) / 65535.)
+        # print(tpl_packet.window if self.protol == "TCP" else 0)
         # IAT
         packet_information.append(math.log(1 + timestamp - self.next_time, math.e))
         self.next_time = timestamp
