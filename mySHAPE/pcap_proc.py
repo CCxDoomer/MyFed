@@ -73,7 +73,7 @@ class Stream:
         packet_information.append(math.log(1 + timestamp - self.next_time, math.e))
         self.next_time = timestamp
         # 数据包方向 0与流方向相同，1与流方向相反
-        packet_information.append(0 if packet["IP"].src == self.src else 0)
+        packet_information.append(0 if packet["IP"].src == self.src else 1)
         # 负载部分
         # 总共取前Nb个字节的负载，每个包取前Nbp个字节的负载
         PAY = []
