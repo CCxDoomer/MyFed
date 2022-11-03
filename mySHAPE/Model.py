@@ -105,7 +105,6 @@ class MultAttention(nn.Module):
             nn.Linear(Nff, N_hidden, bias=True)
         )
 
-
     def forward(self, input: torch.Tensor):
         x = input
         B, N, C = x.shape
@@ -146,4 +145,3 @@ class PreIntegrality(nn.Module):
         x = self.dense(x)
         output = x
         return output
-

@@ -11,6 +11,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH = 32
 E_HAE = 10
 E_PAE = 10
+N_Pmax = 140
+N_layers = 3
 
 
 # 自定义dataset
@@ -56,54 +58,9 @@ def stream_to_data(streams: list):
            [PAY_train_set, PAY_val_set, PAY_test_set]
 
 
-# 将流转变为token
-def strean_to_token(streams: list, myHAE:HAE, myPAE:PAE):
-    tokens = []
-    myHAE.eval()
-    myPAE.eval()
-    for stream_hash in streams:
-        stream: Stream = streams[stream_hash]
-        token = torch.tensor([])
-        token_hat = []
-        HDR = stream.HDR
-        PAY = stream.PAY
-        LPi = stream.LPi
-        # if not len(HDR) == len(PAY):
-        #     print(len(HDR), len(PAY))
-        for i in range(len(PAY)):
-            token_hat.append([1, 0])
-            encHDR = myHAE.Encode(torch.tensor(HDR[i]).unsqueeze(0).to(device))
-            encHDR = encHDR.T.cpu()
-            if LPi[i] == 0:
-                token = torch.cat([token, encHDR], 1)
-                continue
-            encLPi = math.ceil(LPi[i]/8.)
-            for j in range(encLPi):
-                token_hat.append([0, 1])
-            encPAY = myPAE.Encode(torch.tensor(PAY[i]).type(torch.FloatTensor).unsqueeze(0).unsqueeze(1).to(device))
-            encPAY = encPAY.squeeze().cpu()
-            encPAY = encPAY[:, :encLPi]
-            token = torch.cat([token, encHDR, encPAY], 1)
-        for i in range(len(PAY), len(HDR)):
-            encHDR = myHAE.Encode(torch.tensor(HDR[i]).unsqueeze(0).to(device))
-            encHDR = encHDR.cpu()
-            token_hat.append([0, 1])
-            token = torch.cat([token, encHDR], 1)
-        token_hat = torch.from_numpy(np.array(token_hat))
-        token_hat = token_hat.transpose(1, 0)
-        token = torch.cat([token_hat, token], 0)
-        CLS = torch.zeros(N_emb_dims, 1)
-        token = torch.cat([CLS, token], 1)
-        row, col = token.size()
-        for i in range(row):
-            for j in range(col):
-                if i % 2 == 0:
-                    pe = math.sin(j/pow(10000., i//2/N_hidden))
-                else:
-                    pe = math.cos(j/pow(10000., i//2/N_hidden))
-                token[i, j] += pe
-        tokens.append(token)
-    return tokens
+# 对token划分数据集
+# def token_to_data(tokens: list):
+#     for
 
 
 # 预训练HAE
@@ -188,9 +145,84 @@ def pretrain(streams:list):
     return myHAE, myPAE
 
 
+def generate_mask():
+    pe_mask = list()
+    for i in range(N_emb_dims):
+        pe_mask.append([])
+        for j in range(N_Pmax):
+            if i % 2 == 0:
+                pe = math.sin(j / pow(10000., i // 2 / N_hidden))
+            else:
+                pe = math.cos(j / pow(10000., i // 2 / N_hidden))
+            pe_mask[i].append(pe)
+    pe_mask = torch.FloatTensor(pe_mask).cpu()
+    return pe_mask
+
+
+# 将流转变为token
+def strean_to_token(streams: list, myHAE:HAE, myPAE:PAE, mask: torch.Tensor):
+    tokens = []
+    myHAE.eval()
+    myPAE.eval()
+    cnt = 0
+    for stream_hash in streams:
+        if cnt < 500:
+            cnt += 1
+            continue
+        stream: Stream = streams[stream_hash]
+        token = torch.tensor([]).cpu()
+        token_hat = []
+        HDR = stream.HDR
+        PAY = stream.PAY
+        LPi = stream.LPi
+        # Encode
+        for i in range(len(PAY)):
+            # print(i)
+            token_hat.append([1, 0])
+            encHDR = myHAE.Encode(torch.tensor(HDR[i]).unsqueeze(0).to(device))
+            encHDR = encHDR.T.cpu()
+            if LPi[i] == 0:
+                token = torch.cat([token, encHDR], 1)
+                continue
+            encLPi = math.ceil(LPi[i]/8.)
+            for j in range(encLPi):
+                token_hat.append([0, 1])
+            encPAY = myPAE.Encode(torch.tensor(PAY[i]).type(torch.FloatTensor).unsqueeze(0).unsqueeze(1).to(device))
+            encPAY = encPAY.squeeze().cpu()
+            encPAY = encPAY[:, :encLPi]
+            token = torch.cat([token, encHDR, encPAY], 1)
+        for i in range(len(PAY), len(HDR)):
+            encHDR = myHAE.Encode(torch.tensor(HDR[i]).unsqueeze(0).to(device))
+            encHDR = encHDR.cpu()
+            token_hat.append([0, 1])
+            token = torch.cat([token, encHDR], 1)
+        # Embed
+        token_hat = torch.from_numpy(np.array(token_hat))
+        token_hat = token_hat.transpose(1, 0)
+        token = torch.cat([token_hat, token], 0)
+        CLS = torch.zeros(N_emb_dims, 1)
+        token = torch.cat([CLS, token], 1)
+        row, col = token.size()
+        if col < N_Pmax:
+            token = torch.cat([token, torch.zeros(row, N_Pmax - col)], 1)
+        token = token + mask
+        np.savetxt(f'./tokens/{cnt}.csv', token.detach().numpy(), delimiter=',')
+        cnt += 1
+        tokens.append(token)
+    return tokens
+
+
+# 自注意力编码
+def transformer():
+    myTrans = []
+    for i in range(N_layers):
+        myTrans.append(MultAttention(N_Pmax))
+
+
+
 streams = pcap_proc()
 print(len(streams))
 # myHAE, myPAE = pretrain(streams)
 myHAE = torch.load('myHAE.pth').to(device)
 myPAE = torch.load('myPAE.pth').to(device)
-tokens = strean_to_token(streams, myHAE, myPAE)
+tokens = strean_to_token(streams, myHAE, myPAE, generate_mask())
