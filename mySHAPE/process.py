@@ -11,15 +11,20 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH = 32
 E_HAE = 10
 E_PAE = 10
-N_Pmax = 140
-N_layers = 3
+N_Pmax = 64
+N_layers = 4
+jBATCH = 4
 
 
 # 自定义dataset
 class myPreDataSet(object):
-    def __init__(self, X):
+    def __init__(self, X, Y=None):
         self.X = X
-        self.mydata = X
+        self.Y = Y
+        if Y is None:
+            self.mydata = X
+        else:
+            self.mydata = [(x, y) for x, y in zip(X, Y)]
 
     def __getitem__(self, idx):
         return self.mydata[idx]
@@ -42,6 +47,7 @@ def stream_to_data(streams: list):
     PAY = np.array(PAY, dtype=np.float32)
     tHDR = HDR.copy()
     tPAY = PAY.copy()
+    # shuffle
     np.random.shuffle(HDR)
     np.random.shuffle(PAY)
     HDR_div1 = int(len(HDR) * 0.6)
@@ -58,9 +64,54 @@ def stream_to_data(streams: list):
            [PAY_train_set, PAY_val_set, PAY_test_set]
 
 
-# 对token划分数据集
-# def token_to_data(tokens: list):
-#     for
+# 对token划分流完整性数据集
+def token_to_preint_data(np_tokens: list):
+    tokens = []
+    for np_token in np_tokens:
+        tokens.append(np_token)
+    tokens = np.array(tokens)
+    # 0表示未发生替换、1表示发生替换
+    replace_flag = np.array([0 for j in range(len(tokens))], dtype=np.float32)
+    # 0.5的概率将流中的包替换为另一个流的数据
+    for i in range(0, len(tokens)):
+        replace_rand = np.random.rand()
+        if replace_rand <= 0.5:
+            replace_flag[i] = 0
+        else:
+            replace_flag[i] = 1
+            # 流替换算法
+    index = list(range(len(tokens)))
+    # shuffle
+    np.random.shuffle(index)
+    tokens = tokens[index]
+    replace_flag = replace_flag[index]
+    token_div1 = int(len(tokens) * 0.6)
+    token_div2 = int(len(tokens) * 0.8)
+    tokens_train_set = myPreDataSet(tokens[:token_div1], replace_flag[:token_div1])
+    tokens_val_set = myPreDataSet(tokens[token_div1:token_div2], replace_flag[token_div1:token_div2])
+    tokens_test_set = myPreDataSet(tokens[token_div2:], replace_flag[token_div2:])
+    return [tokens_train_set, tokens_val_set, tokens_test_set]
+
+
+# 对token划分流重建数据集
+def token_to_prerec_data(np_tokens: list):
+    tokens = []
+    # 0.07概率将一列变为(0,1)随机数、0.28概率将一列变为0
+    for np_token in np_tokens:
+        change_rand = np.random.rand()
+        pos_rand = np.random.randint(1, np_token.shape[1])
+        if change_rand <= 0.07:
+            np_token[:, pos_rand] = np.random.rand(np_token.shape[0])
+        if change_rand >= 1 - 0.28:
+            np_token[:, pos_rand] = np.zeros(np_token.shape[0])
+        tokens.append(np_token)
+    tokens = np.array(tokens)
+    token_div1 = int(len(tokens) * 0.6)
+    token_div2 = int(len(tokens) * 0.8)
+    tokens_train_set = myPreDataSet(tokens[:token_div1])
+    tokens_val_set = myPreDataSet(tokens[token_div1:token_div2])
+    tokens_test_set = myPreDataSet(tokens[token_div2:])
+    return [tokens_train_set, tokens_val_set, tokens_test_set]
 
 
 # 预训练HAE
@@ -134,7 +185,7 @@ def pretrain_PAE(PAE_set: list, myPAE: PAE):
 
 
 # 预训练，返回训练好的HAE和PAE
-def pretrain(streams:list):
+def pretrain(streams: list):
     HDR, PAY, HDR_set, PAY_set = stream_to_data(streams)
     myHAE = HAE().to(device)
     pretrain_HAE(HDR_set, myHAE)
@@ -160,15 +211,12 @@ def generate_mask():
 
 
 # 将流转变为token
-def strean_to_token(streams: list, myHAE:HAE, myPAE:PAE, mask: torch.Tensor):
+def strean_to_token(streams: list, myHAE: HAE, myPAE: PAE, mask: torch.Tensor):
     tokens = []
     myHAE.eval()
     myPAE.eval()
     cnt = 0
     for stream_hash in streams:
-        if cnt < 500:
-            cnt += 1
-            continue
         stream: Stream = streams[stream_hash]
         token = torch.tensor([]).cpu()
         token_hat = []
@@ -184,7 +232,7 @@ def strean_to_token(streams: list, myHAE:HAE, myPAE:PAE, mask: torch.Tensor):
             if LPi[i] == 0:
                 token = torch.cat([token, encHDR], 1)
                 continue
-            encLPi = math.ceil(LPi[i]/8.)
+            encLPi = math.ceil(LPi[i] / 8.)
             for j in range(encLPi):
                 token_hat.append([0, 1])
             encPAY = myPAE.Encode(torch.tensor(PAY[i]).type(torch.FloatTensor).unsqueeze(0).unsqueeze(1).to(device))
@@ -205,6 +253,10 @@ def strean_to_token(streams: list, myHAE:HAE, myPAE:PAE, mask: torch.Tensor):
         row, col = token.size()
         if col < N_Pmax:
             token = torch.cat([token, torch.zeros(row, N_Pmax - col)], 1)
+        else:
+            token = token[:, :N_Pmax]
+        # print(row, col)
+        # print(token.size())
         token = token + mask
         np.savetxt(f'./tokens/{cnt}.csv', token.detach().numpy(), delimiter=',')
         cnt += 1
@@ -212,17 +264,25 @@ def strean_to_token(streams: list, myHAE:HAE, myPAE:PAE, mask: torch.Tensor):
     return tokens
 
 
-# 自注意力编码
-def transformer():
-    myTrans = []
-    for i in range(N_layers):
-        myTrans.append(MultAttention(N_Pmax))
+# 对transformer进行联合训练
+def joint_pretrain(np_tokens: list, myMult: MultAttention, myHAE: HAE, myPAE: PAE):
+    tokens_integrity_set = token_to_preint_data(np_tokens)
+    int_train_loader = DataLoader(tokens_integrity_set[0], batch_size=jBATCH, shuffle=False)
+    int_val_loader = DataLoader(tokens_integrity_set[1], batch_size=jBATCH, shuffle=False)
+    tokens_reconstruct_set = token_to_prerec_data(np_tokens)
+    rec_train_loader = DataLoader(tokens_reconstruct_set[0], batch_size=jBATCH, shuffle=False)
+    rec_val_loader = DataLoader(tokens_reconstruct_set[1], batch_size=jBATCH, shuffle=False)
 
 
-
-streams = pcap_proc()
-print(len(streams))
-# myHAE, myPAE = pretrain(streams)
-myHAE = torch.load('myHAE.pth').to(device)
-myPAE = torch.load('myPAE.pth').to(device)
-tokens = strean_to_token(streams, myHAE, myPAE, generate_mask())
+if __name__ == '__main__':
+    streams = pcap_proc()
+    print(len(streams))
+    # myHAE, myPAE = pretrain(streams)
+    myHAE = torch.load('myHAE.pth').to(device)
+    myPAE = torch.load('myPAE.pth').to(device)
+    # tokens = strean_to_token(streams, myHAE, myPAE, generate_mask())
+    np_tokens = []
+    for i in range(len(streams)):
+        np_tokens.append(np.loadtxt(f'./tokens/{i}.csv', dtype=np.float32, delimiter=','))
+    myMultAttn = MultAttention(N_layers, N_Pmax).to(device)
+    joint_pretrain(np_tokens, myMultAttn, myHAE, myPAE)

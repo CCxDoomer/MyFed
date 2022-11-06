@@ -16,16 +16,14 @@ class HAE(nn.Module):
     def __init__(self):
         super(HAE, self).__init__()
         self.enc_fc = nn.Linear(N_HDR_dims, N_enc_dims)
-        self.enc_pwise_conv = [None for i in range(N_depth_H)]
-        for i in range(N_depth_H):
-            self.enc_pwise_conv[i] = nn.Linear(N_enc_dims, N_enc_dims).to(device)
+        self.enc_pwise_conv = nn.ModuleList([nn.Linear(N_enc_dims, N_enc_dims) for i in range(N_depth_H)])
         self.dec_fc = nn.Linear(N_enc_dims, N_HDR_dims)
 
     def Encode(self, input):
         x = input
         x = self.enc_fc(x)
-        for i in range(N_depth_H):
-            x = self.enc_pwise_conv[i](x)
+        for layer in self.enc_pwise_conv:
+            x = layer(x)
         output = x
         return output
 
@@ -46,19 +44,22 @@ class PAE(nn.Module):
         super(PAE, self).__init__()
         self.enc_conv = nn.Conv1d(input_dim, N_enc_dims, kernel_size=4, stride=2, padding=1)
         self.act = nn.GELU()
-        self.enc_convs = []
-        for i in range(N_depth_P):
-            self.enc_convs.append(nn.Sequential(
-                nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=3, stride=1, groups=N_enc_dims, padding=1),
-                nn.GELU(),
-                nn.BatchNorm1d(N_enc_dims, )
-            ).to(device))
-        for i in range(N_depth_P):
-            self.enc_convs.append(nn.Sequential(
-                nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=1),
-                nn.GELU(),
-                nn.BatchNorm1d(N_enc_dims, )
-            ).to(device))
+        self.enc_convs = nn.ModuleList([
+                                           nn.Sequential(
+                                               nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=3, stride=1,
+                                                         groups=N_enc_dims, padding=1),
+                                               nn.GELU(),
+                                               nn.BatchNorm1d(N_enc_dims)
+                                           )
+                                           for i in range(N_depth_P)
+                                       ] + [
+                                           nn.Sequential(
+                                               nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=1),
+                                               nn.GELU(),
+                                               nn.BatchNorm1d(N_enc_dims, )
+                                           )
+                                           for i in range(N_depth_P)
+                                       ])
         self.squeeze = nn.Conv1d(N_enc_dims, N_enc_dims, kernel_size=8, stride=4, padding=2)
         self.dec_fc = nn.ConvTranspose1d(N_enc_dims, input_dim, kernel_size=8, stride=8)
 
@@ -88,60 +89,70 @@ class PAE(nn.Module):
 
 
 class MultAttention(nn.Module):
-    def __init__(self, dim, num_heads=N_Atten, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
+    def __init__(self, layers, dim, num_heads=N_Atten, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
         super(MultAttention, self).__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
+        self.layers = layers
         # C = dim, C = M * C1
         self.scale = qk_scale or self.head_dim ** 0.5
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_part = nn.ModuleList([
+            nn.ModuleList([
+                # qkv
+                nn.Linear(dim, dim * 3, bias=qkv_bias),
+                # fc
+                nn.Linear(dim, dim),
+                # ffn
+                nn.Sequential(
+                    nn.Linear(N_hidden, Nff, bias=True),
+                    nn.ReLU(),
+                    nn.Linear(Nff, N_hidden, bias=True)
+                )
+            ])
+            for i in range(self.layers)
+        ])
         self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.norm = nn.BatchNorm1d(dim, )
-        self.FFN = nn.Sequential(
-            nn.Linear(N_hidden, Nff, bias=True),
-            nn.ReLU(),
-            nn.Linear(Nff, N_hidden, bias=True)
-        )
+        self.norm = nn.BatchNorm1d(dim)
+        self.maxPool = nn.MaxPool1d(dim)
+        self.dense = nn.Linear(2 * N_hidden, 1)
 
-    def forward(self, input: torch.Tensor):
+    # 注意力机制
+    def Attention(self, input: torch.Tensor):
         x = input
-        B, N, C = x.shape
-        # B = batch_size
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-        # qkv:[B,N,3,M,C1] → [3,B,M,N,C1]
-        q, k, v = qkv[0], qkv[1], qkv[2]
-        # q,k,v:[B,M,N,C1]
-        attn = ((q @ k.transpose(-2, -1)) * self.scale).softmax(dim=-1)
-        # attn = softmax((q*kT)/sqrt(c1)), attn:[B,M,N,N]
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        # x = attn*v, x:[B,M,N,C1] → [B,N,C]
-        x = self.proj(x)
-        # fc
-        x = self.proj_drop(x)
-        # add and norm
-        x = self.norm(x + input)
-        # FFN
-        tmp = x
-        x = self.FFN(x)
-        # add and norm
-        x = self.norm(x + tmp)
+        for i in range(self.layers):
+            tmp = x
+            B, N, C = x.shape
+            # qkv:[B,N,3,M,C1] → [3,B,M,N,C1], q,k,v:[B,M,N,C1]
+            qkv = self.attn_part[i][0](x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+            q, k, v = qkv[0], qkv[1], qkv[2]
+            # attn = softmax((q*kT)/sqrt(c1)), attn:[B,M,N,N]
+            attn = ((q @ k.transpose(-2, -1)) * self.scale).softmax(dim=-1)
+            # x = attn*v, x:[B,M,N,C1] → [B,N,C]
+            x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+            # fc & add and norm
+            x = self.attn_part[i][1](x)
+            x = self.proj_drop(x)
+            x = self.norm(x + tmp)
+            # FFN & add and norm
+            tmp = x
+            x = self.FFN(x)
+            x = self.norm(x + tmp)
         output = x
         return output
 
-
-class PreIntegrality(nn.Module):
-    def __init__(self):
-        super(PreIntegrality, self).__init__()
-        self.maxPool = nn.AdaptiveMaxPool1d(1)
-        self.dense = nn.Linear(2 * N_enc_dims, 1)
+    def PreIntegrality(self, input: torch.Tensor):
+        x = input
+        x = self.Attention(x)
+        max_x = self.maxPool(x)
+        min_x = -self.maxPool(-x)
+        x = torch.cat([max_x, min_x], 1)
+        x = self.dense(x)
+        output = x
+        return output
 
     def forward(self, input: torch.Tensor):
         x = input
-        max_x = self.maxPool(x)
-        min_x = -self.maxPool(-x)
-        x = torch.cat((max_x, min_x), 0)
-        x = self.dense(x)
+        x = self.Attention(x)
         output = x
         return output
