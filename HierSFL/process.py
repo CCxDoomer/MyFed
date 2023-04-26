@@ -5,7 +5,7 @@ import time
 import numpy as np
 from pcap_proc import Np, Nb
 from model import *
-from torch.utils.data import DataLoader
+from sklearn.metrics import f1_score, confusion_matrix
 
 BATCH = 16
 
@@ -74,6 +74,7 @@ def Cloud_train(Cloud: myCloud, Epoch: int, ratio: int):
         #     for cParam, eParam in zip(Cloud.SR.parameters(), Edge.SR.parameters()):
         #         eParam.data = cParam.data
         train_loss = []; train_acc = []; val_loss = []; val_acc = []
+        f1 = []
         Cloud.HDR.train(); Cloud.PAY.train(); Cloud.SR.train(); Cloud.Enc.train()
         for hdr, pay, y in Cloud.train_set:
             y = y.type(torch.LongTensor)
@@ -82,10 +83,9 @@ def Cloud_train(Cloud: myCloud, Epoch: int, ratio: int):
             y = y.to(device)
             tmp1 = Cloud.HDR(hdr)
             tmp2 = Cloud.PAY(pay)
-            tmp = torch.cat((tmp1, tmp2), 1)
-            if tmp.shape[0] == 1:
+            if tmp1.shape[0] == 1:
                 continue
-            tmp = Cloud.SR(tmp)
+            tmp = Cloud.SR(tmp2, tmp1)
             y_ = Cloud.Enc(tmp)
             loss = loss_fn(y_, y)
             Cloud.optimizer_HDR.zero_grad(); Cloud.optimizer_PAY.zero_grad()
@@ -106,17 +106,18 @@ def Cloud_train(Cloud: myCloud, Epoch: int, ratio: int):
             y = y.to(device)
             tmp1 = Cloud.HDR(hdr)
             tmp2 = Cloud.PAY(pay)
-            tmp = torch.cat((tmp1, tmp2), 1)
-            if tmp.shape[0] == 1:
+            if tmp1.shape[0] == 1:
                 continue
-            tmp = Cloud.SR(tmp)
+            tmp = Cloud.SR(tmp2, tmp1)
             y_ = Cloud.Enc(tmp)
             loss = loss_fn(y_, y)
             y_ = torch.max(y_, -1)[1]
             val_acc.append(y_.eq(y.data.view_as(y_)).long().cpu().sum() / y_.shape[0])
             val_loss.append(loss.cpu().item())
+            f1.append(f1_score(y.cpu(), y_.cpu(), ))
         val_loss = np.mean(val_loss); val_acc = np.mean(val_acc)
-        print(f"Cloud_{e}: {train_loss} {train_acc} {val_loss} {val_acc} {time.time()}")
+        f1 = np.mean(f1)
+        print(f"Cloud_{e}: {train_loss} {train_acc} {val_loss} {val_acc} {time.time()} {f1}")
 
 def Edge_train(Edge: myEdge, ratio: int):
     init_time = time.time()
@@ -147,10 +148,9 @@ def Edge_train(Edge: myEdge, ratio: int):
             y = y.to(device)
             tmp1 = Edge.HDR(hdr)
             tmp2 = Edge.PAY(pay)
-            tmp = torch.cat((tmp1, tmp2), 1)
-            if tmp.shape[0] == 1:
+            if tmp1.shape[0] == 1:
                 continue
-            tmp = Edge.SR(tmp)
+            tmp = Edge.SR(tmp2, tmp1)
             y_ = Edge.ELoss(tmp)
             loss = loss_fn(y_, y)
             Edge.optimizer_HDR.zero_grad(); Edge.optimizer_PAY.zero_grad()
@@ -168,10 +168,9 @@ def Edge_train(Edge: myEdge, ratio: int):
             y = y.to(device)
             tmp1 = Edge.HDR(hdr)
             tmp2 = Edge.PAY(pay)
-            tmp = torch.cat((tmp1, tmp2), 1)
-            if tmp.shape[0] == 1:
+            if tmp1.shape[0] == 1:
                 continue
-            tmp = Edge.SR(tmp)
+            tmp = Edge.SR(tmp2, tmp1)
             y_ = Edge.ELoss(tmp)
             loss = loss_fn(y_, y)
             val_loss.append(loss.cpu().item())
@@ -191,10 +190,9 @@ def Client_train(Client: myClient, Epoch: int):
             y = y.to(device)
             tmp1 = Client.HDR(hdr)
             tmp2 = Client.PAY(pay)
-            tmp = torch.cat((tmp1, tmp2), 1)
-            if tmp.shape[0] == 1:
+            if tmp1.shape[0] == 1:
                 continue
-            y_ = Client.CLoss(tmp)
+            y_ = Client.CLoss(tmp2, tmp1)
             loss = loss_fn(y_, y)
             Client.optimizer_HDR.zero_grad(); Client.optimizer_PAY.zero_grad()
             Client.optimizer_Loss.zero_grad()
@@ -212,10 +210,9 @@ def Client_train(Client: myClient, Epoch: int):
             y = y.to(device)
             tmp1 = Client.HDR(hdr)
             tmp2 = Client.PAY(pay)
-            tmp = torch.cat((tmp1, tmp2), 1)
-            if tmp.shape[0] == 1:
+            if tmp1.shape[0] == 1:
                 continue
-            y_ = Client.CLoss(tmp)
+            y_ = Client.CLoss(tmp2, tmp1)
             loss = loss_fn(y_, y)
             val_loss.append(loss.cpu().item())
         val_loss = np.mean(val_loss)
@@ -223,6 +220,7 @@ def Client_train(Client: myClient, Epoch: int):
 
 def test(Cloud: myCloud):
     test_loss = []; test_acc = []
+    confussion_m = np.array([[0, 0], [0, 0]])
     loss_fn = nn.CrossEntropyLoss()
     Cloud.HDR.eval(); Cloud.PAY.eval(); Cloud.SR.eval(); Cloud.Enc.eval()
     for hdr, pay, y in Cloud.test_set:
@@ -232,17 +230,18 @@ def test(Cloud: myCloud):
         y = y.to(device)
         tmp1 = Cloud.HDR(hdr)
         tmp2 = Cloud.PAY(pay)
-        tmp = torch.cat((tmp1, tmp2), 1)
-        if tmp.shape[0] == 1:
+        if tmp1.shape[0] == 1:
             continue
-        tmp = Cloud.SR(tmp)
+        tmp = Cloud.SR(tmp2, tmp1)
         y_ = Cloud.Enc(tmp)
         loss = loss_fn(y_, y)
         y_ = torch.max(y_, -1)[1]
         test_acc.append(y_.eq(y.data.view_as(y_)).long().cpu().sum() / y_.shape[0])
         test_loss.append(loss.cpu().item())
+        confussion_m = np.add(confussion_m, confusion_matrix(y.cpu(), y_.cpu()))
     test_loss = np.mean(test_loss); test_acc = np.mean(test_acc)
     print(f"test: {test_loss} {test_acc}")
+    print(f"confusion: {confussion_m}")
 
 def Fed_train(Server: rawFedServer, Epoch: int, ratio: int):
     loss_fn = nn.CrossEntropyLoss()
@@ -290,7 +289,7 @@ def Fed_train(Server: rawFedServer, Epoch: int, ratio: int):
                     loss = loss_fn(y_, y)
                     val_loss.append(loss.cpu().item())
                 val_loss = np.mean(val_loss)
-                print(f"Client_{i}_{j}: {train_loss} {val_loss} {time.time()}")
+                # print(f"Client_{i}_{j}: {train_loss} {val_loss} {time.time()}")
         for cParam in Server.HDR.parameters():
             cParam.data.zero_()
         for cParam in Server.PAY.parameters():
@@ -318,6 +317,7 @@ def Fed_train(Server: rawFedServer, Epoch: int, ratio: int):
         #     for cParam, eParam in zip(Server.Enc.parameters(), Client.Enc.parameters()):
         #         eParam.data = cParam.data
         train_loss = []; train_acc = []; val_loss = []; val_acc = []
+        f1 = []
         Server.HDR.train(); Server.PAY.train(); Server.SR.train(); Server.Enc.train()
         for hdr, pay, y in Server.train_set:
             y = y.type(torch.LongTensor)
@@ -358,12 +358,15 @@ def Fed_train(Server: rawFedServer, Epoch: int, ratio: int):
             y_ = torch.max(y_, -1)[1]
             val_acc.append(y_.eq(y.data.view_as(y_)).long().cpu().sum() / y_.shape[0])
             val_loss.append(loss.cpu().item())
+            f1.append(f1_score(y.cpu(), y_.cpu(), ))
         val_loss = np.mean(val_loss); val_acc = np.mean(val_acc)
-        print(f"Server_{e}: {train_loss} {train_acc} {val_loss} {val_acc} {time.time()}")
+        f1 = np.mean(f1)
+        print(f"Server_{e}: {train_loss} {train_acc} {val_loss} {val_acc} {time.time()} {f1}")
 
 def Fed_test(Server: rawFedServer):
     test_loss = []; test_acc = []
     loss_fn = nn.CrossEntropyLoss()
+    confussion_m = np.array([[0, 0], [0, 0]])
     Server.HDR.eval(); Server.PAY.eval(); Server.SR.eval(); Server.Enc.eval()
     for hdr, pay, y in Server.test_set:
         y = y.type(torch.LongTensor)
@@ -381,5 +384,7 @@ def Fed_test(Server: rawFedServer):
         y_ = torch.max(y_, -1)[1]
         test_acc.append(y_.eq(y.data.view_as(y_)).long().cpu().sum() / y_.shape[0])
         test_loss.append(loss.cpu().item())
+        confussion_m = np.add(confussion_m, confusion_matrix(y.cpu(), y_.cpu()))
     test_loss = np.mean(test_loss); test_acc = np.mean(test_acc)
     print(f"test: {test_loss} {test_acc}")
+    print(f"confusion: {confussion_m}")

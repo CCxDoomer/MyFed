@@ -61,8 +61,8 @@ if __name__ == "__main__":
     for file in VPNfiles2:
         mystreams.update(pcap_proc(os.path.join(fpath_VPN2, file), cnt=stream_num, isVPN=True))
     print(len(mystreams))
-    rawFed(mystreams)
-
+    # rawFed(mystreams)
+    exFed(mystreams)
     # print(len(train_set), len(val_set), len(test_set))
     # train(myHDR, myPAY, mySR, myEnc, train_set, val_set)
     # local_train(myHDR, myPAY, mySR, myEnc, myCLoss, myELoss, ratio, train_set, val_set)

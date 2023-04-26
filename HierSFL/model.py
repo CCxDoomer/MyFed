@@ -46,8 +46,6 @@ class SM_PAY(nn.Module):
         x = self.relu(x)
         x = self.maxpool(x)
         x = self.drop(x)
-        x = self.fc(x)
-        x = self.relu(x)
         output = x
         return output
 
@@ -66,20 +64,20 @@ class SM_HDR(nn.Module):
         x = x.transpose(0, 1)
         x = self.relu(x)
         x = self.drop(x)
-        x = self.fc(x)
-        x = self.relu(x)
         output = x
         return output
 
 class SR(nn.Module):
     def __init__(self, ):
         super(SR, self).__init__()
+        self.fc_pay = nn.Linear(76, 128)
+        self.fc_hdr = nn.Linear(64, 128)
         self.drop = nn.Dropout(0.2)
         self.fc = nn.Linear(128, 128)
         self.relu = nn.ReLU()
 
-    def forward(self, input):
-        x = input
+    def forward(self, input1, input2):
+        x = torch.cat((self.relu(self.fc_pay(input1)), self.relu(self.fc_hdr(input2))), 1)
         x = self.drop(x)
         x = self.fc(x)
         x = self.relu(x)
@@ -125,11 +123,30 @@ class Local_Loss(nn.Module):
         output = x
         return output
 
+class Client_Local_Loss(nn.Module):
+    def __init__(self, ):
+        super(Client_Local_Loss, self).__init__()
+        self.fc_pay = nn.Linear(76, 128)
+        self.fc_hdr = nn.Linear(64, 128)
+        self.conv = nn.Conv1d(36, 1, 1)
+        self.fc = nn.Linear(128, 2)
+        self.relu = nn.ReLU()
+
+    def forward(self, input1, input2):
+        x = torch.cat((self.relu(self.fc_pay(input1)), self.relu(self.fc_hdr(input2))), 1)
+        x = self.conv(x)
+        x = self.relu(x)
+        x = self.fc(x)
+        x = x.squeeze()
+        x = nn.functional.log_softmax(x, dim=1)
+        output = x
+        return output
+
 class myClient:
     def __init__(self, train, val, code):
         self.HDR = SM_HDR().to(device)
         self.PAY = SM_PAY().to(device)
-        self.CLoss = Local_Loss().to(device)
+        self.CLoss = Client_Local_Loss().to(device)
         self.optimizer_HDR = torch.optim.Adam(self.HDR.parameters(), lr=1e-5, )
         self.optimizer_PAY = torch.optim.Adam(self.PAY.parameters(), lr=1e-5, )
         self.optimizer_Loss = torch.optim.Adam(self.CLoss.parameters(), lr=1e-5, )
