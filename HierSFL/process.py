@@ -175,7 +175,7 @@ def Edge_train(Edge: myEdge, ratio: int):
             loss = loss_fn(y_, y)
             val_loss.append(loss.cpu().item())
         val_loss = np.mean(val_loss)
-        print(f"Edge_{Edge.name}_{e}: {train_loss} {val_loss} {time.time()}")
+        # print(f"Edge_{Edge.name}_{e}: {train_loss} {val_loss} {time.time()}")
 
 def Client_train(Client: myClient, Epoch: int):
     init_time = time.time()
@@ -216,7 +216,7 @@ def Client_train(Client: myClient, Epoch: int):
             loss = loss_fn(y_, y)
             val_loss.append(loss.cpu().item())
         val_loss = np.mean(val_loss)
-        print(f"Client_{Client.name}_{e}: {train_loss} {val_loss} {time.time()}")
+        # print(f"Client_{Client.name}_{e}: {train_loss} {val_loss} {time.time()}")
 
 def test(Cloud: myCloud):
     test_loss = []; test_acc = []
@@ -307,15 +307,15 @@ def Fed_train(Server: rawFedServer, Epoch: int, ratio: int):
                 cParam.data += eParam.data / len(Server.Client)
             for cParam, eParam in zip(Server.Enc.parameters(), Client.Enc.parameters()):
                 cParam.data += eParam.data / len(Server.Client)
-        for Client in Server.Client:
-            for cParam, eParam in zip(Server.HDR.parameters(), Client.HDR.parameters()):
-                eParam.data = cParam.data
-            for cParam, eParam in zip(Server.PAY.parameters(), Client.PAY.parameters()):
-                eParam.data = cParam.data
-            for cParam, eParam in zip(Server.SR.parameters(), Client.SR.parameters()):
-                eParam.data = cParam.data
-            for cParam, eParam in zip(Server.Enc.parameters(), Client.Enc.parameters()):
-                eParam.data = cParam.data
+        # for Client in Server.Client:
+        #     for cParam, eParam in zip(Server.HDR.parameters(), Client.HDR.parameters()):
+        #         eParam.data = cParam.data
+        #     for cParam, eParam in zip(Server.PAY.parameters(), Client.PAY.parameters()):
+        #         eParam.data = cParam.data
+        #     for cParam, eParam in zip(Server.SR.parameters(), Client.SR.parameters()):
+        #         eParam.data = cParam.data
+        #     for cParam, eParam in zip(Server.Enc.parameters(), Client.Enc.parameters()):
+        #         eParam.data = cParam.data
         train_loss = []; train_acc = []; val_loss = []; val_acc = []
         f1 = []
         Server.HDR.train(); Server.PAY.train(); Server.SR.train(); Server.Enc.train()
