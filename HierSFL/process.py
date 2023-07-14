@@ -66,13 +66,13 @@ def Cloud_train(Cloud: myCloud, Epoch: int, ratio: int):
                 cParam.data += eParam.data / len(Cloud.Edge)
             for cParam, eParam in zip(Cloud.SR.parameters(), Edge.SR.parameters()):
                 cParam.data += eParam.data / len(Cloud.Edge)
-        # for Edge in Cloud.Edge:
-        #     for cParam, eParam in zip(Cloud.HDR.parameters(), Edge.HDR.parameters()):
-        #         eParam.data = cParam.data
-        #     for cParam, eParam in zip(Cloud.PAY.parameters(), Edge.PAY.parameters()):
-        #         eParam.data = cParam.data
-        #     for cParam, eParam in zip(Cloud.SR.parameters(), Edge.SR.parameters()):
-        #         eParam.data = cParam.data
+        for Edge in Cloud.Edge:
+            for cParam, eParam in zip(Cloud.HDR.parameters(), Edge.HDR.parameters()):
+                eParam.data = cParam.data
+            for cParam, eParam in zip(Cloud.PAY.parameters(), Edge.PAY.parameters()):
+                eParam.data = cParam.data
+            for cParam, eParam in zip(Cloud.SR.parameters(), Edge.SR.parameters()):
+                eParam.data = cParam.data
         train_loss = []; train_acc = []; val_loss = []; val_acc = []
         f1 = []
         Cloud.HDR.train(); Cloud.PAY.train(); Cloud.SR.train(); Cloud.Enc.train()
@@ -134,11 +134,11 @@ def Edge_train(Edge: myEdge, ratio: int):
                 eParam.data += cParam.data / len(Edge.Client)
             for eParam, cParam in zip(Edge.PAY.parameters(), Client.PAY.parameters()):
                 eParam.data += cParam.data / len(Edge.Client)
-        # for Client in Edge.Client:
-        #     for eParam, cParam in zip(Edge.HDR.parameters(), Client.HDR.parameters()):
-        #         cParam.data = eParam.data
-        #     for eParam, cParam in zip(Edge.PAY.parameters(), Client.PAY.parameters()):
-        #         cParam.data = eParam.data
+        for Client in Edge.Client:
+            for eParam, cParam in zip(Edge.HDR.parameters(), Client.HDR.parameters()):
+                cParam.data = eParam.data
+            for eParam, cParam in zip(Edge.PAY.parameters(), Client.PAY.parameters()):
+                cParam.data = eParam.data
         train_loss = []; val_loss = []
         Edge.HDR.train(); Edge.PAY.train(); Edge.SR.train(); Edge.ELoss.train()
         for hdr, pay, y in Edge.train_set:
@@ -307,15 +307,15 @@ def Fed_train(Server: rawFedServer, Epoch: int, ratio: int):
                 cParam.data += eParam.data / len(Server.Client)
             for cParam, eParam in zip(Server.Enc.parameters(), Client.Enc.parameters()):
                 cParam.data += eParam.data / len(Server.Client)
-        # for Client in Server.Client:
-        #     for cParam, eParam in zip(Server.HDR.parameters(), Client.HDR.parameters()):
-        #         eParam.data = cParam.data
-        #     for cParam, eParam in zip(Server.PAY.parameters(), Client.PAY.parameters()):
-        #         eParam.data = cParam.data
-        #     for cParam, eParam in zip(Server.SR.parameters(), Client.SR.parameters()):
-        #         eParam.data = cParam.data
-        #     for cParam, eParam in zip(Server.Enc.parameters(), Client.Enc.parameters()):
-        #         eParam.data = cParam.data
+        for Client in Server.Client:
+            for cParam, eParam in zip(Server.HDR.parameters(), Client.HDR.parameters()):
+                eParam.data = cParam.data
+            for cParam, eParam in zip(Server.PAY.parameters(), Client.PAY.parameters()):
+                eParam.data = cParam.data
+            for cParam, eParam in zip(Server.SR.parameters(), Client.SR.parameters()):
+                eParam.data = cParam.data
+            for cParam, eParam in zip(Server.Enc.parameters(), Client.Enc.parameters()):
+                eParam.data = cParam.data
         train_loss = []; train_acc = []; val_loss = []; val_acc = []
         f1 = []
         Server.HDR.train(); Server.PAY.train(); Server.SR.train(); Server.Enc.train()
